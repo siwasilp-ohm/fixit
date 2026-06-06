@@ -1,0 +1,24 @@
+{
+  "name": "FixIt — ระบบแจ้งซ่อม",
+  "short_name": "FixIt",
+  "description": "ระบบแจ้งซ่อมออนไลน์ สำหรับองค์กร",
+  "start_url": "./index.php",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1565C0",
+  "theme_color": "#2196F3",
+  "lang": "th",
+  "icons": [
+    { "src": "icon.php?size=72",  "sizes": "72x72",   "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon.php?size=96",  "sizes": "96x96",   "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon.php?size=128", "sizes": "128x128", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon.php?size=192", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon.php?size=512", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    { "name": "แจ้งซ่อมใหม่", "url": "./app.php#new-repair" },
+    { "name": "รายการของฉัน", "url": "./app.php#my-repairs" }
+  ]
+}
