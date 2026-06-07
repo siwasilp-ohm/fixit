@@ -1438,6 +1438,7 @@ const App = {
     Router.add('reports',       () => viewReports());
     Router.add('settings',      () => viewSettings());
     Router.add('new-repair',    () => { viewRepairs(false); setTimeout(()=>openRepairForm(),400); });
+    Router.add('system',        () => viewSystem());
 
     Router.init();
     UI.hideLoading();
@@ -1482,6 +1483,7 @@ const App = {
         { hash:'categories', icon:'fa-tags', label:'หมวดหมู่งาน' },
       ] : []),
       ...((isManager||isDirector) ? [{ hash:'reports', icon:'fa-chart-line', label:'รายงาน' }] : []),
+      ...(u.role === 'admin' ? [{ hash:'system', icon:'fa-shield-halved', label:'จัดการระบบ' }] : []),
       { section:'ทั่วไป' },
       { hash:'settings', icon:'fa-gear', label:'การตั้งค่า' },
     ];
@@ -1576,6 +1578,335 @@ async function viewAssetDetail(id) {
       </div>
     </div>`;
   if (window.innerWidth < 900) pc.querySelector('div[style*="grid-template-columns"]').style.gridTemplateColumns = '1fr';
+}
+
+// ═══════════════════════════════════════════════
+// SYSTEM — Admin Panel
+// ═══════════════════════════════════════════════
+let _logPage = 1, _logFilters = {};
+
+async function viewSystem() {
+  if (_user.role !== 'admin') { UI.toast('error','ไม่มีสิทธิ์เข้าถึงหน้านี้'); return; }
+  document.getElementById('page-title').textContent = 'จัดการระบบ';
+  const pc = document.getElementById('page-content');
+  _logPage = 1; _logFilters = {};
+
+  const tabBar = (active) => `
+    <div class="tabs mb-4">
+      <button class="tab-btn ${active==='overview'?'active':''}" onclick="__sysTab('overview')"><i class="fa-solid fa-server"></i> ข้อมูลระบบ</button>
+      <button class="tab-btn ${active==='logs'?'active':''}" onclick="__sysTab('logs')"><i class="fa-solid fa-terminal"></i> Activity Log</button>
+      <button class="tab-btn ${active==='backup'?'active':''}" onclick="__sysTab('backup')"><i class="fa-solid fa-database"></i> สำรองข้อมูล</button>
+    </div>
+    <div id="sys-content"></div>`;
+
+  window.__sysTab = async (tab) => {
+    pc.innerHTML = tabBar(tab);
+    if (tab === 'overview') await _renderSysOverview();
+    else if (tab === 'logs') await _renderSysLogs(1, {});
+    else if (tab === 'backup') await _renderSysBackup();
+  };
+
+  pc.innerHTML = tabBar('overview');
+  await _renderSysOverview();
+}
+
+function _sysFmtBytes(b) {
+  if (!b || b === 0) return '0 B';
+  const k = 1024, s = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(Math.max(1, b)) / Math.log(k));
+  return (b / Math.pow(k, i)).toFixed(1) + ' ' + s[i];
+}
+
+async function _renderSysOverview() {
+  const sc = document.getElementById('sys-content');
+  sc.innerHTML = '<div class="text-center py-4"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--primary)"></i></div>';
+  const res = await API.get('api/system.php?action=info');
+  if (!res?.success) {
+    sc.innerHTML = '<div class="empty-state"><div class="empty-state-icon"><i class="fa-solid fa-triangle-exclamation"></i></div><h3>ไม่สามารถโหลดข้อมูลระบบได้</h3></div>';
+    return;
+  }
+  const d = res;
+  const diskUsed = (d.disk_total || 0) - (d.disk_free || 0);
+  const diskPct  = d.disk_total ? Math.min(100, Math.round((diskUsed / d.disk_total) * 100)) : 0;
+  const diskColor = diskPct >= 90 ? '#ef4444' : diskPct >= 70 ? '#f59e0b' : '#22c55e';
+
+  const requiredExts = ['gd','pdo_mysql','mbstring','zip','curl','json'];
+  const loadedSet = new Set(d.extensions || []);
+
+  const tables = d.table_list || [];
+  const maxRows = Math.max(...tables.map(t => parseInt(t.rows) || 0), 1);
+
+  sc.innerHTML = `
+    <div class="sys-grid mb-4">
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#4f46e522"><i class="fa-brands fa-php" style="color:#4f46e5;font-size:22px"></i></div>
+        <div><div class="sys-card-label">PHP Version</div><div class="sys-card-value">${d.php_version||'-'}</div></div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#0891b222"><i class="fa-solid fa-database" style="color:#0891b2"></i></div>
+        <div><div class="sys-card-label">MySQL Version</div><div class="sys-card-value">${d.db_version||'-'}</div></div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#16a34a22"><i class="fa-solid fa-memory" style="color:#16a34a"></i></div>
+        <div><div class="sys-card-label">Memory Limit</div><div class="sys-card-value">${d.memory_limit||'-'}</div></div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#d9770622"><i class="fa-solid fa-hard-drive" style="color:#d97706"></i></div>
+        <div><div class="sys-card-label">ขนาดฐานข้อมูล</div><div class="sys-card-value">${_sysFmtBytes(d.db_size)}</div></div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#dc262622"><i class="fa-solid fa-folder-open" style="color:#dc2626"></i></div>
+        <div><div class="sys-card-label">Uploads / Backups</div><div class="sys-card-value">${_sysFmtBytes(d.upload_size)} / ${_sysFmtBytes(d.backup_size)}</div></div>
+      </div>
+      <div class="sys-card">
+        <div class="sys-card-icon" style="background:#71717a22"><i class="fa-solid fa-clock" style="color:#71717a"></i></div>
+        <div><div class="sys-card-label">เวลาเซิร์ฟเวอร์</div><div class="sys-card-value" style="font-size:13px">${d.server_time||'-'}</div></div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-title mb-3"><i class="fa-solid fa-hard-drive"></i> พื้นที่ดิสก์</div>
+      <div class="flex items-center gap-3 mb-2">
+        <div style="flex:1">
+          <div class="gauge-wrap"><div class="gauge-bar"><div class="gauge-fill" id="disk-gauge-fill" style="width:0%;background:${diskColor};transition:width 1s ease"></div></div></div>
+        </div>
+        <div style="font-size:15px;font-weight:700;color:${diskColor};min-width:52px;text-align:right">${diskPct}%</div>
+      </div>
+      <div class="flex justify-between" style="font-size:12.5px;color:var(--text-muted)">
+        <span>ใช้แล้ว: <strong>${_sysFmtBytes(diskUsed)}</strong></span>
+        <span>ว่าง: <strong>${_sysFmtBytes(d.disk_free)}</strong></span>
+        <span>ทั้งหมด: <strong>${_sysFmtBytes(d.disk_total)}</strong></span>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-title mb-3"><i class="fa-solid fa-table"></i> ตารางฐานข้อมูล <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(${d.db_name||''})</span></div>
+      <div class="db-table-list">
+        ${tables.map(t => {
+          const rows = parseInt(t.rows) || 0;
+          const pct = Math.round((rows / maxRows) * 100);
+          return `<div class="db-table-row">
+            <div class="db-table-name"><code>${t.table_name}</code></div>
+            <div style="color:var(--text-muted);font-size:12px;min-width:80px;text-align:right">${rows.toLocaleString()} rows</div>
+            <div class="db-table-bar-wrap" style="flex:1;margin:0 12px"><div class="db-table-bar"><div class="db-table-bar-fill" style="width:${pct}%"></div></div></div>
+            <div style="font-size:12px;color:var(--text-muted);min-width:60px;text-align:right">${_sysFmtBytes(parseInt(t.size)||0)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title mb-3"><i class="fa-solid fa-puzzle-piece"></i> PHP Extensions</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        ${requiredExts.map(ext => {
+          const ok = loadedSet.has(ext);
+          return `<span class="ext-badge ${ok?'ext-ok':'ext-miss'}"><i class="fa-solid ${ok?'fa-check':'fa-xmark'}"></i> ${ext}</span>`;
+        }).join('')}
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">OS: ${d.php_os||'-'} &nbsp;|&nbsp; Server: ${d.server_software||'-'} &nbsp;|&nbsp; Max Exec: ${d.max_exec||'-'}s &nbsp;|&nbsp; Post Max: ${d.post_max||'-'}</div>
+    </div>
+  `;
+
+  setTimeout(() => {
+    const bar = document.getElementById('disk-gauge-fill');
+    if (bar) bar.style.width = diskPct + '%';
+  }, 80);
+}
+
+async function _renderSysLogs(page = 1, filters = {}) {
+  _logPage = page; _logFilters = filters;
+  const sc = document.getElementById('sys-content');
+  sc.innerHTML = '<div class="text-center py-4"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--primary)"></i></div>';
+
+  const qs = new URLSearchParams({ action:'logs', page, limit:50 });
+  Object.entries(filters).forEach(([k, v]) => { if (v) qs.set(k, v); });
+  const res = await API.get(`api/system.php?${qs}`);
+
+  const fColor = { success:'#22c55e', warning:'#f59e0b', error:'#ef4444', info:'#60a5fa' };
+  const statLabel = { success:'OK', warning:'WARN', error:'ERR', info:'INFO' };
+  const modulesForFilter = res?.modules?.length ? res.modules : ['auth','repairs','users','assets','categories','system'];
+
+  sc.innerHTML = `
+    <div class="card mb-3" style="padding:14px 16px">
+      <div class="flex gap-2 flex-wrap items-center">
+        <select id="log-f-module" class="form-control" style="width:140px;height:36px;font-size:13px" onchange="_applyLogFilter()">
+          <option value="">ทุก Module</option>
+          ${modulesForFilter.map(m => `<option value="${m}" ${filters.module===m?'selected':''}>${m}</option>`).join('')}
+        </select>
+        <select id="log-f-status" class="form-control" style="width:120px;height:36px;font-size:13px" onchange="_applyLogFilter()">
+          <option value="">ทุกสถานะ</option>
+          ${['success','warning','error','info'].map(s => `<option value="${s}" ${filters.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <input id="log-f-search" class="form-control" placeholder="ค้นหา action / ชื่อ..." style="width:190px;height:36px;font-size:13px" value="${filters.search||''}" onkeydown="if(event.key==='Enter')_applyLogFilter()">
+        <input type="date" id="log-f-from" class="form-control" style="width:140px;height:36px;font-size:13px" value="${filters.date_from||''}">
+        <input type="date" id="log-f-to" class="form-control" style="width:140px;height:36px;font-size:13px" value="${filters.date_to||''}">
+        <button class="btn btn-primary btn-sm" onclick="_applyLogFilter()"><i class="fa-solid fa-magnifying-glass"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="_renderSysLogs(1,{})" title="รีเซ็ตตัวกรอง"><i class="fa-solid fa-rotate-right"></i></button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="_exportLogsCsv()"><i class="fa-solid fa-file-csv"></i> Export</button>
+          <button class="btn btn-sm" style="background:#ef444422;color:#ef4444;border:1px solid #ef444433" onclick="_clearOldLogs()"><i class="fa-solid fa-trash"></i> ล้าง Log เก่า</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-terminal">
+      <div class="log-terminal-header">
+        <span><i class="fa-solid fa-circle" style="color:#ef4444;font-size:9px"></i> <i class="fa-solid fa-circle" style="color:#f59e0b;font-size:9px"></i> <i class="fa-solid fa-circle" style="color:#22c55e;font-size:9px"></i></span>
+        <span style="color:#64748b;font-size:11.5px;margin-left:12px">activity_log — ${res?.total||0} records • page ${page}</span>
+        <span style="margin-left:auto;color:#475569;font-size:11px">${new Date().toLocaleTimeString('th-TH')}</span>
+      </div>
+      <div class="log-terminal-body">
+        ${!(res?.data?.length)
+          ? `<div class="log-row" style="color:#475569;font-style:italic;padding:20px 0">[ ไม่มีข้อมูล log ในช่วงเวลานี้ ]</div>`
+          : res.data.map(log => {
+              const c = fColor[log.status] || '#94a3b8';
+              const sl = statLabel[log.status] || (log.status||'').toUpperCase();
+              const dt = (log.created_at||'').replace('T',' ').substring(0, 19);
+              return `<div class="log-row">
+                <span class="log-time">${dt}</span>
+                <span class="log-lvl" style="color:${c};background:${c}22;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;min-width:36px;text-align:center;display:inline-block;letter-spacing:.5px">${sl}</span>
+                <span class="log-user">${log.username||'system'}</span>
+                <span style="color:#475569;font-size:11px">(${ROLES[log.role]||log.role||'-'})</span>
+                <span class="log-module">[${log.module||'-'}]</span>
+                <span style="color:#e2e8f0">${log.action||''}</span>
+                ${log.target_name ? `<span style="color:#64748b"> → ${log.target_name}</span>` : ''}
+                ${log.details ? `<span style="color:#4b5563;font-size:11px"> | ${log.details}</span>` : ''}
+              </div>`;
+            }).join('')}
+      </div>
+    </div>
+    <div id="log-pagination" class="pagination mt-3"></div>
+  `;
+
+  renderPagination('log-pagination', res?.total||0, page, 50, `(p)=>_renderSysLogs(p,_logFilters)`);
+}
+
+function _applyLogFilter() {
+  const filters = {
+    module:    document.getElementById('log-f-module')?.value  || '',
+    status:    document.getElementById('log-f-status')?.value  || '',
+    search:    document.getElementById('log-f-search')?.value  || '',
+    date_from: document.getElementById('log-f-from')?.value    || '',
+    date_to:   document.getElementById('log-f-to')?.value      || '',
+  };
+  _renderSysLogs(1, filters);
+}
+
+async function _clearOldLogs() {
+  const result = await Swal.fire({
+    title: 'ล้าง Activity Log เก่า',
+    html: 'ลบ log ที่เก่ากว่ากี่วัน?',
+    input: 'number',
+    inputValue: 30,
+    inputAttributes: { min:1, max:365, step:1 },
+    confirmButtonText: '<i class="fa-solid fa-trash"></i> ล้าง Log',
+    confirmButtonColor: '#ef4444',
+    showCancelButton: true,
+    cancelButtonText: 'ยกเลิก',
+  });
+  if (!result.isConfirmed || !result.value) return;
+  const res = await API.delete(`api/system.php?action=logs&days=${result.value}`);
+  if (res?.success) { UI.toast('success', res.message||'ล้าง Log สำเร็จ'); _renderSysLogs(1, _logFilters); }
+  else UI.toast('error', res?.message || 'เกิดข้อผิดพลาด');
+}
+
+function _exportLogsCsv() {
+  const qs = new URLSearchParams({ action:'logs', page:1, limit:9999, export:'csv' });
+  Object.entries(_logFilters).forEach(([k, v]) => { if (v) qs.set(k, v); });
+  window.location.href = `api/system.php?${qs}`;
+}
+
+async function _renderSysBackup() {
+  const sc = document.getElementById('sys-content');
+  sc.innerHTML = '<div class="text-center py-4"><i class="fa-solid fa-spinner fa-spin fa-2x" style="color:var(--primary)"></i></div>';
+  const res = await API.get('api/system.php?action=backups');
+  const backups = res?.data || [];
+
+  const fmtDt = (s) => {
+    if (!s) return '-';
+    return new Date(s).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  };
+
+  sc.innerHTML = `
+    <div id="backup-progress-overlay" class="backup-progress-overlay" style="display:none">
+      <div class="backup-progress-box">
+        <i class="fa-solid fa-database fa-2x mb-3" style="color:var(--primary)"></i>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px">กำลังสร้าง Backup...</div>
+        <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:18px">กรุณารอสักครู่ อย่าปิดหน้าต่างนี้</div>
+        <div class="gauge-wrap" style="width:260px"><div class="gauge-bar"><div id="backup-prog-bar" class="gauge-fill" style="width:5%;background:var(--primary);transition:width .4s ease"></div></div></div>
+      </div>
+    </div>
+
+    <div class="backup-grid">
+      <div class="backup-new-card" onclick="_createBackup()">
+        <div style="font-size:40px;margin-bottom:10px;color:var(--primary)"><i class="fa-solid fa-plus-circle"></i></div>
+        <div style="font-weight:600;font-size:15px;color:var(--primary)">สร้าง Backup ใหม่</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Manual full backup ทั้งระบบ</div>
+      </div>
+      ${backups.length === 0 ? '<div style="color:var(--text-muted);font-size:13px;display:flex;align-items:center;padding:16px 20px">ยังไม่มีไฟล์ backup</div>' : ''}
+      ${backups.map(b => `
+        <div class="backup-card">
+          <div class="backup-card-icon"><i class="fa-solid fa-file-code"></i></div>
+          <div class="backup-filename" title="${b.filename}">${b.filename}</div>
+          <div class="backup-meta">
+            <div class="backup-meta-item"><i class="fa-solid fa-table"></i> ${b.tables_count||0} ตาราง</div>
+            <div class="backup-meta-item"><i class="fa-solid fa-list-ol"></i> ${parseInt(b.rows_count||0).toLocaleString()} แถว</div>
+            <div class="backup-meta-item"><i class="fa-solid fa-weight-hanging"></i> ${_sysFmtBytes(b.filesize)}</div>
+            <div class="backup-meta-item">
+              <span class="badge ${b.type==='manual'?'badge-primary':'badge-info'}" style="font-size:10px">${b.type}</span>
+              ${!b.exists ? '<span class="badge badge-cancelled" style="font-size:10px"><i class="fa-solid fa-triangle-exclamation"></i> ไฟล์หาย</span>' : ''}
+            </div>
+          </div>
+          ${b.note ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px"><i class="fa-solid fa-note-sticky"></i> ${b.note}</div>` : ''}
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+            <div>
+              <div style="font-size:11.5px;color:var(--text-muted)">${fmtDt(b.created_at)}</div>
+              ${b.created_by_name ? `<div style="font-size:11px;color:var(--text-muted)">โดย ${b.created_by_name}</div>` : ''}
+            </div>
+            <div class="backup-actions">
+              ${b.exists ? `<button class="btn btn-primary btn-sm" onclick="_downloadBackup(${b.id})" title="ดาวน์โหลด"><i class="fa-solid fa-download"></i></button>` : ''}
+              <button class="btn btn-sm" style="background:#ef444422;color:#ef4444;border:1px solid #ef444433" onclick="_deleteBackup(${b.id},'${b.filename.replace(/'/g,"\\'")}')" title="ลบ"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+}
+
+async function _createBackup() {
+  const overlay = document.getElementById('backup-progress-overlay');
+  const bar = document.getElementById('backup-prog-bar');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  let pct = 5;
+  const tick = setInterval(() => {
+    pct = Math.min(88, pct + (88 - pct) * 0.04 + 0.5);
+    if (bar) bar.style.width = pct + '%';
+  }, 300);
+  const res = await API.post('api/system.php?action=backup', {});
+  clearInterval(tick);
+  if (bar) bar.style.width = '100%';
+  setTimeout(() => {
+    overlay.style.display = 'none';
+    if (res?.success) {
+      UI.toast('success', `สร้าง Backup สำเร็จ! ${res.filename||''}`);
+      _renderSysBackup();
+    } else {
+      UI.toast('error', res?.message || 'เกิดข้อผิดพลาดในการสร้าง Backup');
+    }
+  }, 500);
+}
+
+function _downloadBackup(id) {
+  window.location.href = `api/system.php?action=download&id=${id}`;
+}
+
+async function _deleteBackup(id, filename) {
+  const conf = await UI.confirm(`ลบ Backup "<strong>${filename}</strong>" ใช่หรือไม่?<br><small style="color:#9ca3af">ไฟล์จะถูกลบถาวร ไม่สามารถกู้คืนได้</small>`, 'ยืนยันการลบ Backup');
+  if (!conf.isConfirmed) return;
+  const res = await API.delete(`api/system.php?action=backup&id=${id}`);
+  if (res?.success) { UI.toast('success','ลบ Backup สำเร็จ'); _renderSysBackup(); }
+  else UI.toast('error', res?.message || 'เกิดข้อผิดพลาด');
 }
 
 // Start

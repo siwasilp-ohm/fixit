@@ -28,10 +28,16 @@ if ($method === 'POST' && $action === 'login') {
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['user']    = $safe;
 
+    log_activity($pdo, 'เข้าสู่ระบบสำเร็จ', 'auth', $user['username'], $user['id'], 'success',
+        "Role: {$user['role']} | IP: " . ($_SERVER['REMOTE_ADDR'] ?? ''));
+
     json_response(['success' => true, 'user' => $safe]);
 }
 
 if ($method === 'POST' && $action === 'logout') {
+    if (!empty($_SESSION['user_id'])) {
+        log_activity($pdo, 'ออกจากระบบ', 'auth', $_SESSION['user']['username'] ?? '');
+    }
     session_destroy();
     json_response(['success' => true]);
 }

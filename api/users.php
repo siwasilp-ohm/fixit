@@ -50,7 +50,9 @@ if ($method === 'POST') {
             $data['role'], clean($data['department']??''), clean($data['email']??''),
             clean($data['phone']??''), $data['theme_color']??'#2196F3'
         ]);
-    json_response(['success'=>true,'message'=>'เพิ่มผู้ใช้งานสำเร็จ','id'=>(int)$pdo->lastInsertId()]);
+    $newId = (int)$pdo->lastInsertId();
+    log_activity($pdo, 'เพิ่มผู้ใช้งาน', 'users', clean($data['username']), $newId, 'success', "Role: {$data['role']}");
+    json_response(['success'=>true,'message'=>'เพิ่มผู้ใช้งานสำเร็จ','id'=>$newId]);
 }
 
 if ($method === 'PUT') {
@@ -68,13 +70,16 @@ if ($method === 'PUT') {
                        clean($data['email']??''), clean($data['phone']??''), $data['theme_color']??'#2196F3',
                        (int)($data['active']??1), $id]);
     }
+    log_activity($pdo, 'แก้ไขผู้ใช้งาน', 'users', '', $id);
     json_response(['success'=>true,'message'=>'แก้ไขผู้ใช้งานสำเร็จ']);
 }
 
 if ($method === 'DELETE') {
     if (!$id) json_response(['success'=>false,'message'=>'ระบุ ID ด้วย'], 400);
     if ($id === $_SESSION['user_id']) json_response(['success'=>false,'message'=>'ไม่สามารถลบตัวเองได้'], 400);
+    $stmt = $pdo->prepare("SELECT username FROM users WHERE id=?"); $stmt->execute([$id]); $u=$stmt->fetch();
     $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$id]);
+    log_activity($pdo, 'ลบผู้ใช้งาน', 'users', $u['username']??'', $id, 'warning');
     json_response(['success'=>true,'message'=>'ลบผู้ใช้งานสำเร็จ']);
 }
 

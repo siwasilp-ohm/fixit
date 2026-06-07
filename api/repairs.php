@@ -117,6 +117,7 @@ if ($method === 'POST' && !$action) {
     ]);
     $newId = (int)$pdo->lastInsertId();
     log_repair_history($pdo, $newId, null, 'pending', 'แจ้งซ่อมใหม่', 'รับเรื่องแจ้งซ่อม: ' . clean($data['subject']));
+    log_activity($pdo, 'สร้างใบแจ้งซ่อม', 'repairs', $repair_number, $newId, 'success', clean($data['subject']));
 
     json_response(['success'=>true,'message'=>'แจ้งซ่อมสำเร็จ','id'=>$newId,'repair_number'=>$repair_number]);
 }
@@ -183,6 +184,9 @@ if ($method === 'PUT' && $action === 'status') {
     ];
     $actionLabel = 'เปลี่ยนสถานะ: ' . ($statusLabels[$newStatus] ?? $newStatus);
     log_repair_history($pdo, $id, $repair['status'], $newStatus, $actionLabel, $comment, $cost);
+    log_activity($pdo, "เปลี่ยนสถานะ: {$repair['repair_number']}", 'repairs',
+        $repair['repair_number'], $id, 'success',
+        ($statusLabels[$repair['status']] ?? $repair['status']) . ' → ' . ($statusLabels[$newStatus] ?? $newStatus));
 
     json_response(['success'=>true,'message'=>'เปลี่ยนสถานะสำเร็จ']);
 }

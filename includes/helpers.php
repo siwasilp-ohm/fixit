@@ -67,3 +67,19 @@ function log_repair_history(PDO $pdo, int $repair_id, ?string $old_status, strin
         $cost
     ]);
 }
+
+function log_activity(PDO $pdo, string $action, string $module = '', string $target_name = '', ?int $target_id = null, string $status = 'success', string $details = ''): void {
+    try {
+        $pdo->prepare(
+            "INSERT INTO activity_logs (user_id, username, role, action, module, target_id, target_name, ip_address, status, details)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )->execute([
+            $_SESSION['user_id'] ?? null,
+            $_SESSION['user']['username'] ?? 'system',
+            $_SESSION['user']['role']     ?? '',
+            $action, $module, $target_id, $target_name,
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            $status, $details,
+        ]);
+    } catch (\Exception $e) { /* never break main flow */ }
+}

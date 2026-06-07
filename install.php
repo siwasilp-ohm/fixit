@@ -164,6 +164,39 @@ $tables['repair_history'] = "CREATE TABLE IF NOT EXISTS `repair_history` (
     FOREIGN KEY (`user_id`)   REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+$tables['activity_logs'] = "CREATE TABLE IF NOT EXISTS `activity_logs` (
+    `id`          INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id`     INT,
+    `username`    VARCHAR(50),
+    `role`        VARCHAR(20),
+    `action`      VARCHAR(200) NOT NULL,
+    `module`      VARCHAR(50)  DEFAULT '',
+    `target_id`   INT,
+    `target_name` VARCHAR(200),
+    `ip_address`  VARCHAR(45),
+    `status`      ENUM('success','warning','error','info') DEFAULT 'success',
+    `details`     TEXT,
+    `created_at`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_module`  (`module`),
+    INDEX `idx_user`    (`user_id`),
+    INDEX `idx_status`  (`status`),
+    INDEX `idx_created` (`created_at`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+$tables['backups'] = "CREATE TABLE IF NOT EXISTS `backups` (
+    `id`           INT AUTO_INCREMENT PRIMARY KEY,
+    `filename`     VARCHAR(255) NOT NULL,
+    `filesize`     BIGINT DEFAULT 0,
+    `tables_count` INT DEFAULT 0,
+    `rows_count`   INT DEFAULT 0,
+    `type`         ENUM('manual','scheduled') DEFAULT 'manual',
+    `note`         TEXT,
+    `created_by`   INT,
+    `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
 foreach ($tables as $name => $sql) {
     try {
         $pdo->exec($sql);
@@ -233,7 +266,7 @@ if ((int)$stmt->fetchColumn() === 0) {
 }
 
 // ─── Uploads dirs ──────────────────────────────────────────────────────────
-$dirs = [__DIR__.'/uploads', __DIR__.'/uploads/repairs', __DIR__.'/uploads/chunks'];
+$dirs = [__DIR__.'/uploads', __DIR__.'/uploads/repairs', __DIR__.'/uploads/chunks', __DIR__.'/backups'];
 foreach ($dirs as $d) {
     if (!is_dir($d)) @mkdir($d, 0755, true);
     step("โฟลเดอร์ {$d}", is_writable($d), is_writable($d) ? 'เขียนได้' : 'ไม่มีสิทธิ์เขียน');
