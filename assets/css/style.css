@@ -800,12 +800,17 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 .flex  { display: flex; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
+.gap-1 { gap: 4px; }
 .gap-2 { gap: 8px; }
 .gap-3 { gap: 12px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-4 { margin-bottom: 16px; }
 .mb-6 { margin-bottom: 24px; }
 .mt-4 { margin-top: 16px; }
+.ml-1 { margin-left: 4px; }
+.ml-2 { margin-left: 8px; }
+.mr-1 { margin-right: 4px; }
+.p-0 { padding: 0; }
 .text-sm { font-size: 12.5px; }
 .text-muted { color: var(--text-muted); }
 .text-center { text-align: center; }
@@ -813,3 +818,16 @@ select.form-control { appearance: none; background-image: url("data:image/svg+xm
 .w-full { width: 100%; }
 .d-none { display: none !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Notification Badge ──────────────────────── */
+.nav-item .nav-pending {
+  margin-left: auto; background: var(--danger);
+  color: #fff; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 20px;
+  min-width: 20px; text-align: center;
+  animation: badgePop .4s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes badgePop { from{transform:scale(0)} to{transform:scale(1)} }
+
+/* ── Inline status bar (repair form) ─────────── */
+.asset-option-badge { font-size: 11px; color: var(--text-muted); margin-left: 6px; }

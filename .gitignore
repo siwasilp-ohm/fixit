@@ -1,0 +1,22 @@
+# ── Uploads (user content, never commit) ──
+uploads/repairs/
+uploads/chunks/
+
+# ── Sensitive config (copy config.sample.php → config.php) ──
+config/config.php
+
+# ── OS / IDE ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── PHP/Composer ──
+vendor/
+composer.lock
+
+# ── Logs ──
+*.log
+error_log

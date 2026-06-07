@@ -5,6 +5,11 @@ require_auth();
 $pdo    = get_pdo();
 $action = $_GET['action'] ?? 'upload';
 
+// Ensure runtime dirs exist
+foreach ([UPLOAD_DIR, UPLOAD_DIR.'repairs/', CHUNK_DIR] as $_dir) {
+    if (!is_dir($_dir)) @mkdir($_dir, 0755, true);
+}
+
 // ── Chunked upload ───────────────────────────────────────────────────────
 if ($action === 'chunk') {
     $upload_id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['upload_id']   ?? '');

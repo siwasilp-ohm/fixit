@@ -1,14 +1,29 @@
 <?php
 require_once __DIR__ . '/../includes/helpers.php';
-require_role('admin', 'officer');
+require_auth();
 
-$pdo    = get_pdo();
-$method = $_SERVER['REQUEST_METHOD'];
-$id     = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$pdo        = get_pdo();
+$method     = $_SERVER['REQUEST_METHOD'];
+$id         = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$canManage  = in_array($_SESSION['user']['role'], ['admin','officer']);
+
+// All authenticated users may fetch a specific role list (e.g. technicians for dropdowns)
+// Full CRUD requires admin / officer
+if ($method !== 'GET' || ($id === 0 && !$_GET['role'] ?? true)) {
+    if (!$canManage) json_response(['success'=>false,'message'=>'Forbidden'], 403);
+}
 
 if ($method === 'GET') {
     $search = clean($_GET['search'] ?? '');
     $role   = clean($_GET['role']   ?? '');
+
+    // Non-managers can only fetch specific role list (limited fields)
+    if (!$canManage && $role) {
+        $stmt = $pdo->prepare("SELECT id, full_name, role, department FROM users WHERE role=? AND active=1 ORDER BY full_name");
+        $stmt->execute([$role]);
+        json_response(['success'=>true,'data'=>$stmt->fetchAll()]);
+    }
+    if (!$canManage) json_response(['success'=>false,'message'=>'Forbidden'], 403);
     $sql    = "SELECT id,username,full_name,role,department,email,phone,theme_color,active,created_at FROM users WHERE 1=1";
     $params = [];
     if ($search) { $sql .= " AND (username LIKE ? OR full_name LIKE ?)"; $params[] = "%{$search}%"; $params[] = "%{$search}%"; }

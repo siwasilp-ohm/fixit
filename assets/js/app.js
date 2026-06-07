@@ -192,10 +192,11 @@ const UI = {
 };
 
 // ═══════════════════════════════════════════════
-// ROUTER
+// ROUTER  (supports /path/id?key=val)
 // ═══════════════════════════════════════════════
 const Router = {
   routes: {},
+  params: {},   // parsed query params from hash
   init() {
     window.addEventListener('hashchange', () => this._run());
     this._run();
@@ -203,10 +204,20 @@ const Router = {
   add(hash, fn) { this.routes[hash] = fn; },
   go(hash) { location.hash = hash; },
   _run() {
-    const raw   = location.hash.replace('#','') || 'dashboard';
-    const parts = raw.split('/');
+    const raw = (location.hash.replace('#','') || 'dashboard');
+    // Split path from query string
+    const [pathPart, queryPart] = raw.split('?');
+    const parts = pathPart.split('/');
     const key   = parts[0];
-    const fn    = this.routes[key] || this.routes['dashboard'];
+    // Parse query string into Router.params
+    this.params = {};
+    if (queryPart) {
+      queryPart.split('&').forEach(kv => {
+        const [k,v] = kv.split('=');
+        if (k) this.params[decodeURIComponent(k)] = decodeURIComponent(v||'');
+      });
+    }
+    const fn = this.routes[key] || this.routes['dashboard'];
     if (fn) fn(parts[1]);
     App.setActiveNav(key);
   }
@@ -292,7 +303,7 @@ async function viewDashboard() {
     { key:'completed',        label:'เสร็จสิ้น',       icon:'fa-check-double',      bg:'#E8F5E9', color:'#1B5E20' },
   ];
   document.getElementById('stats-grid').innerHTML = statsConf.map((s,i)=>`
-    <div class="stat-card" style="animation-delay:${i*.07}s;cursor:pointer" onclick="Router.go('repairs?status=${s.key}')">
+    <div class="stat-card" style="animation-delay:${i*.07}s;cursor:pointer" onclick="Router.go('${s.key==='total'?'repairs':'repairs?status='+s.key}')">
       <div class="stat-icon" style="background:${s.bg};color:${s.color}"><i class="fa-solid ${s.icon}"></i></div>
       <div class="stat-info">
         <div class="stat-value" style="color:${s.color}">${counts[s.key]||0}</div>
@@ -567,6 +578,14 @@ async function viewRepairs(forMine = false) {
       <div class="table-footer"><span id="rep-count"></span><div class="pagination" id="rep-pagination"></div></div>
     </div>`;
 
+  // Pre-fill status filter from Router.params (e.g. from dashboard card click)
+  const preStatus = Router.params['status'] || '';
+  if (preStatus) {
+    const sel = document.getElementById('rep-status');
+    if (sel) sel.value = preStatus;
+    Router.params = {}; // consume
+  }
+
   const load = async () => {
     const params = new URLSearchParams({
       search: document.getElementById('rep-search').value,
@@ -671,7 +690,7 @@ async function viewRepairDetail(id) {
           <div class="card-title mb-4"><i class="fa-solid fa-images"></i> รูปภาพ</div>
           ${['before','after'].map(type=>{
             const imgs = r.images.filter(i=>i.type===type);
-            return imgs.length ? `<div class="mb-2"><div class="detail-label" style="margin-bottom:8px">${type==='before'?'ก่อนซ่อม':'หลังซ่อม'}</div><div class="img-gallery">${imgs.map(img=>`<img src="uploads/${img.filename}" class="img-thumb" onclick="openLightbox('uploads/${img.filename}')" onerror="this.src='assets/icons/no-image.png'">`).join('')}</div></div>`:''
+            return imgs.length ? `<div class="mb-2"><div class="detail-label" style="margin-bottom:8px">${type==='before'?'ก่อนซ่อม':'หลังซ่อม'}</div><div class="img-gallery">${imgs.map(img=>`<img src="uploads/${img.filename}" class="img-thumb" onclick="openLightbox('uploads/${img.filename}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2290%22 height=%2290%22 viewBox=%220 0 90 90%22%3E%3Crect width=%2290%22 height=%2290%22 fill=%22%23f0f4f8%22/%3E%3Ctext x=%2245%22 y=%2255%22 font-size=%2228%22 text-anchor=%22middle%22 fill=%22%23aaa%22%3E🖼%3C/text%3E%3C/svg%3E'">`).join('')}</div></div>`:''
           }).join('')}
         </div>`:''}
 
@@ -797,49 +816,83 @@ async function uploadFileChunked(file, repairId, imgType, previewEl) {
 // STATUS MODAL
 // ═══════════════════════════════════════════════
 function openStatusModal(id, currentStatus, cancelOnly = false) {
-  const isManager = ['admin','officer','director'].includes(_user.role);
-  const nextStatuses = {
+  const role = _user.role;
+  const isAdmin   = ['admin','officer'].includes(role);
+  const isDirector = role === 'director';
+  const isTech    = role === 'technician';
+
+  // Each role has a different set of allowed status transitions
+  const managerNext = {
     pending:          ['estimating','cancelled'],
     estimating:       ['waiting_approval','cancelled'],
     waiting_approval: ['approved','cancelled'],
     approved:         ['in_progress','cancelled'],
     in_progress:      ['completed','cancelled'],
-    completed:        [],
-    cancelled:        [],
+    completed: [], cancelled: [],
   };
-  const available = cancelOnly ? ['cancelled'] : (isManager ? nextStatuses[currentStatus] : ['cancelled']);
+  const directorNext = {
+    waiting_approval: ['approved','cancelled'],
+    approved:         ['in_progress'],
+    pending:[], estimating:[], in_progress:[], completed:[], cancelled:[],
+  };
+  const techNext = {
+    approved:    ['in_progress'],
+    in_progress: ['completed'],
+    pending:[], estimating:[], waiting_approval:[], completed:[], cancelled:[],
+  };
 
-  if (!available.length) { UI.toast('info','ไม่สามารถเปลี่ยนสถานะได้'); return; }
+  let available;
+  if (cancelOnly) {
+    available = ['cancelled'];
+  } else if (isAdmin) {
+    available = managerNext[currentStatus] || [];
+  } else if (isDirector) {
+    available = directorNext[currentStatus] || [];
+  } else if (isTech) {
+    available = techNext[currentStatus] || [];
+  } else {
+    available = ['cancelled']; // reporter can only cancel (handled separately)
+  }
 
-  const needsCost = ['estimating','waiting_approval','approved','in_progress','completed'].includes(currentStatus);
+  if (!available.length) { UI.toast('info','ไม่สามารถเปลี่ยนสถานะได้ในขณะนี้'); return; }
+
+  const showCost    = ['estimating','waiting_approval','completed'].includes(available[0]);
+  const showAssign  = isAdmin && ['approved','in_progress'].includes(available[0]);
+
   UI.modal.show('เปลี่ยนสถานะรายการ', `
     <div class="form-group mb-4">
       <label class="form-label required">สถานะใหม่</label>
-      <select id="new-status" class="form-control">
+      <select id="new-status" class="form-control" onchange="onStatusSelectChange()">
         ${available.map(s=>`<option value="${s}">${STATUS[s]?.label||s}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group mb-4" id="cost-group" style="${needsCost?'':'display:none'}">
-      <label class="form-label">ค่าใช้จ่าย (บาท)</label>
+    <div class="form-group mb-4" id="cost-group" style="${showCost?'':'display:none'}">
+      <label class="form-label">ค่าใช้จ่าย / ราคาประเมิน (บาท)</label>
       <input type="number" id="status-cost" class="form-control" min="0" step="0.01" placeholder="0.00">
     </div>
-    ${isManager&&['approved','in_progress'].includes(available[0])?`
-    <div class="form-group mb-4">
+    ${showAssign ? `
+    <div class="form-group mb-4" id="assign-group">
       <label class="form-label">มอบหมายช่างซ่อม</label>
-      <select id="assign-tech" class="form-control"><option value="">-- ไม่ระบุ --</option>${_techs.map(t=>`<option value="${t.id}">${t.full_name}</option>`).join('')}</select>
-    </div>`:''}
+      <select id="assign-tech" class="form-control">
+        <option value="">-- ไม่ระบุ --</option>
+        ${_techs.map(t=>`<option value="${t.id}">${t.full_name}</option>`).join('')}
+      </select>
+    </div>` : ''}
     <div class="form-group">
-      <label class="form-label">หมายเหตุ</label>
+      <label class="form-label">หมายเหตุ / รายละเอียด</label>
       <textarea id="status-comment" class="form-control" rows="3" placeholder="ระบุรายละเอียดเพิ่มเติม..."></textarea>
     </div>`,
     [`<button class="btn btn-ghost" onclick="UI.modal.close()">ยกเลิก</button>`,
      `<button class="btn btn-primary" onclick="submitStatus(${id})"><i class="fa-solid fa-save"></i> บันทึกสถานะ</button>`]
   );
+}
 
-  document.getElementById('new-status')?.addEventListener('change', function() {
-    const costGroup = document.getElementById('cost-group');
-    if (costGroup) costGroup.style.display = ['estimating','waiting_approval','completed'].includes(this.value) ? '' : 'none';
-  });
+function onStatusSelectChange() {
+  const val = document.getElementById('new-status')?.value;
+  const costGroup = document.getElementById('cost-group');
+  if (costGroup) costGroup.style.display = ['estimating','waiting_approval','completed'].includes(val) ? '' : 'none';
+  const assignGroup = document.getElementById('assign-group');
+  if (assignGroup) assignGroup.style.display = ['approved','in_progress'].includes(val) ? '' : 'none';
 }
 
 async function submitStatus(id) {
@@ -859,12 +912,21 @@ async function submitStatus(id) {
 // REPAIR FORM (New Request)
 // ═══════════════════════════════════════════════
 let _tempUploads = [];
-function openRepairForm() {
+let _assets = [];   // cached asset list for repair form
+
+async function openRepairForm(prefillAssetId = '') {
   _tempUploads = [];
+  // Fetch assets for the dropdown (only if not cached or small list)
+  if (!_assets.length) {
+    const res = await API.get('api/assets.php?status=active');
+    _assets = res?.data || [];
+  }
+  const assetOptions = _assets.map(a=>`<option value="${a.id}" ${String(a.id)===String(prefillAssetId)?'selected':''}>${a.name} (${a.asset_code})</option>`).join('');
+
   UI.modal.show('แจ้งซ่อมใหม่', `
     <div class="form-group mb-4">
       <label class="form-label required">อาการ/ปัญหา</label>
-      <input id="rf-subject" class="form-control" placeholder="อธิบายอาการเสียหรือปัญหาที่พบ">
+      <input id="rf-subject" class="form-control" placeholder="อธิบายอาการเสียหรือปัญหาที่พบ" autofocus>
     </div>
     <div class="form-grid">
       <div class="form-group">
@@ -878,6 +940,13 @@ function openRepairForm() {
         <label class="form-label">ความสำคัญ</label>
         <select id="rf-priority" class="form-control">
           ${Object.entries(PRIORITY).map(([k,v])=>`<option value="${k}" ${k==='normal'?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group full">
+        <label class="form-label">เครื่อง/อุปกรณ์ที่เสีย <span class="text-muted">(ถ้ามี)</span></label>
+        <select id="rf-asset" class="form-control">
+          <option value="">-- ไม่ระบุ / เลือกอุปกรณ์ --</option>
+          ${assetOptions}
         </select>
       </div>
       <div class="form-group">
@@ -899,7 +968,7 @@ function openRepairForm() {
         <input type="file" accept="image/*" multiple onchange="handleTempUpload(this)">
         <div class="upload-zone-icon"><i class="fa-solid fa-camera"></i></div>
         <div class="upload-zone-text">คลิกหรือลากไฟล์มาวางที่นี่</div>
-        <div class="upload-zone-hint">รองรับ JPG, PNG — หลายไฟล์ได้</div>
+        <div class="upload-zone-hint">รองรับ JPG, PNG, WEBP — หลายไฟล์ได้</div>
       </div>
       <div id="rf-preview" class="upload-preview-list"></div>
     </div>`,
@@ -907,6 +976,15 @@ function openRepairForm() {
      `<button class="btn btn-primary" onclick="submitRepair()"><i class="fa-solid fa-paper-plane"></i> ส่งแจ้งซ่อม</button>`],
     'modal-lg'
   );
+  // Auto-fill location when asset is selected
+  document.getElementById('rf-asset')?.addEventListener('change', function() {
+    const a = _assets.find(x=>String(x.id)===this.value);
+    if (a) {
+      if (a.building) document.getElementById('rf-building').value = a.building;
+      if (a.room)     document.getElementById('rf-room').value = a.room;
+    }
+  });
+  if (prefillAssetId) document.getElementById('rf-asset')?.dispatchEvent(new Event('change'));
 }
 
 function handleTempUpload(input) {
@@ -933,6 +1011,7 @@ async function submitRepair() {
   const data = {
     subject,
     category_id:  document.getElementById('rf-cat').value,
+    asset_id:     document.getElementById('rf-asset')?.value || '',
     priority:     document.getElementById('rf-priority').value,
     building:     document.getElementById('rf-building').value,
     room:         document.getElementById('rf-room').value,
@@ -1336,13 +1415,16 @@ const App = {
     });
     document.addEventListener('click', () => { document.getElementById('theme-popover').style.display = 'none'; });
 
-    // Load categories for filters
-    const catRes = await API.get('api/categories.php');
-    _cats = catRes?.data || [];
-
-    // Load technicians
-    const techRes = await API.get('api/users.php?role=technician');
+    // Load categories and technicians in parallel
+    const [catRes, techRes] = await Promise.all([
+      API.get('api/categories.php'),
+      API.get('api/users.php?role=technician'),
+    ]);
+    _cats  = catRes?.data  || [];
     _techs = techRes?.data || [];
+
+    // Load pending count for badge (non-blocking)
+    App.refreshPendingBadge();
 
     // Register routes
     Router.add('dashboard',     () => viewDashboard());
@@ -1355,7 +1437,7 @@ const App = {
     Router.add('asset-detail',  (id) => viewAssetDetail(id));
     Router.add('reports',       () => viewReports());
     Router.add('settings',      () => viewSettings());
-    Router.add('new-repair',    () => { viewRepairs(false); setTimeout(openRepairForm,400); });
+    Router.add('new-repair',    () => { viewRepairs(false); setTimeout(()=>openRepairForm(),400); });
 
     Router.init();
     UI.hideLoading();
@@ -1418,6 +1500,26 @@ const App = {
     });
   },
 
+  async refreshPendingBadge() {
+    // Fetch dashboard counts silently (no loading overlay)
+    try {
+      const res = await fetch('api/dashboard.php');
+      if (!res.ok) return;
+      const json = await res.json();
+      const pending = (json.counts?.pending || 0) + (json.counts?.waiting_approval || 0);
+      // Update any nav-item that shows repairs
+      document.querySelectorAll('.nav-item[data-hash="repairs"]').forEach(el => {
+        let badge = el.querySelector('.nav-pending');
+        if (pending > 0) {
+          if (!badge) { badge = document.createElement('span'); badge.className='nav-pending'; el.appendChild(badge); }
+          badge.textContent = pending > 99 ? '99+' : pending;
+        } else if (badge) {
+          badge.remove();
+        }
+      });
+    } catch { /* silent */ }
+  },
+
   async logout() {
     const conf = await UI.confirm('ต้องการออกจากระบบใช่หรือไม่?', 'ออกจากระบบ');
     if (!conf.isConfirmed) return;
@@ -1468,7 +1570,7 @@ async function viewAssetDetail(id) {
             <div style="font-size:13px;margin-top:4px">${r.subject}</div>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">${UI.fmtDate(r.created_at)} • ${r.reporter_name||'-'}</div>
           </div>`).join('') : '<div class="text-center text-muted" style="padding:20px">ยังไม่มีประวัติการแจ้งซ่อม</div>'}
-        <button class="btn btn-primary w-full mt-4" onclick="openRepairForm(); setTimeout(()=>document.getElementById('rf-subject')?.focus(),200)">
+        <button class="btn btn-primary w-full mt-4" onclick="openRepairForm('${a.id}')">
           <i class="fa-solid fa-plus"></i> แจ้งซ่อมสำหรับอุปกรณ์นี้
         </button>
       </div>
